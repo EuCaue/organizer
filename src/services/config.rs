@@ -1,56 +1,68 @@
-use dirs_next;
-use serde::Deserialize;
-use serde::Serialize;
-use std::env;
-use std::fs;
-use std::path::PathBuf;
-use std::process;
+use serde::{Deserialize, Serialize};
+use std::{env, fs, path::PathBuf};
+use std::collections::HashMap;
 
-#[derive(Deserialize, Serialize, Debug)]
-pub struct Config {}
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct Config {
+    #[serde(default)]
+    pub dry_run: bool,
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {}
-    }
+    #[serde(default)]
+    pub root: Vec<Root>,
 }
 
-fn get_config_path() -> PathBuf {
-    const CONFIG_FILE_NAME: &str = "bomdia.toml";
-    if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
-        return PathBuf::from(xdg).join(CONFIG_FILE_NAME);
-    }
-    dirs_next::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(format!(".config/{}", CONFIG_FILE_NAME))
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Root {
+    pub path: String,
+
+    #[serde(default)]
+    pub folders: HashMap<String, FolderRule>,
 }
 
-pub fn get_config() -> Config {
-    let path = get_config_path();
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct FolderRule {
+    #[serde(default)]
+    pub mime: Vec<String>,
 
-    if !path.exists() {
-        let default_config = Config::default();
-        let toml_str = toml::to_string_pretty(&default_config).unwrap_or_else(|err| {
-            eprintln!("Error serializing default config: {}", err);
-            process::exit(1);
-        });
-        fs::write(&path, toml_str).unwrap_or_else(|err| {
-            eprintln!("Failed to create file {}: {}", path.display(), err);
-            process::exit(1);
-        });
+    #[serde(default)]
+    pub patterns: Vec<String>,
 
-        println!("Config created at: {}", path.display());
-        return default_config;
+    #[serde(default)]
+    pub use_regex: bool,
+}
+
+impl Config {
+    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+        let path = Self::path();
+
+        if !path.exists() {
+            let default_config = Config::default();
+            let toml = toml::to_string_pretty(&default_config)?;
+
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+}
+
+            fs::write(&path, toml)?;
+            return Ok(default_config);
+        }
+
+        let content = fs::read_to_string(&path)?;
+        let config = toml::from_str(&content)?;
+
+        Ok(config)
     }
 
-    let conteudo = fs::read_to_string(&path).unwrap_or_else(|err| {
-        eprintln!("Failed to read file {:#?}: {}", path, err);
-        process::exit(1);
-    });
+    pub fn path() -> PathBuf {
+        const CONFIG_FILE_NAME: &str = "bomdia.toml";
 
-    let config: Config = toml::from_str(&conteudo).unwrap_or_else(|err| {
-        eprintln!("Error processing file format: {}", err);
-        process::exit(1);
-    });
-    config
+        if let Some(xdg) = env::var_os("XDG_CONFIG_HOME") {
+            return PathBuf::from(xdg).join(CONFIG_FILE_NAME);
+        }
+
+        dirs_next::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".config")
+            .join(CONFIG_FILE_NAME)
+    }
 }
